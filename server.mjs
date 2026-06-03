@@ -3,10 +3,38 @@ import dotenv from 'dotenv'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { InteractiveBrowserCredential } from '@azure/identity'
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url))
 
-dotenv.config({ path: path.join(serverDir, '.env.local') })
+dotenv.config({ path: path.join(serverDir, '.env') })
+dotenv.config({ path: path.join(serverDir, '.env.local'), override: true })
+
+// Load .md knowledge files at startup and cache them
+const MD_FILES = [
+  'renewal-risk-score-aggregator.md',
+  'billing-financial-signals.md',
+  'subscription-lifecycle-signals.md',
+  'engagement-signals-scoring.md',
+  'commercial-fit-signals.md',
+  'engagement-signals-erd.md',
+]
+let _knowledgeBase = null
+const getKnowledgeBase = async () => {
+  if (_knowledgeBase) return _knowledgeBase
+  const sections = await Promise.all(
+    MD_FILES.map(async (f) => {
+      try {
+        const content = await readFile(path.join(serverDir, 'public', f), 'utf8')
+        return `### ${f}\n${content}`
+      } catch {
+        return null
+      }
+    })
+  )
+  _knowledgeBase = sections.filter(Boolean).join('\n\n---\n\n')
+  return _knowledgeBase
+}
 
 const port = Number(process.env.BOT_TOKEN_SERVER_PORT || 3978)
 
@@ -14,9 +42,7 @@ let lastGroundedDashboard = null
 
 const buildRiskPrompt = (assetIds) => `Reply with JSON only. No explanation, no markdown, just the JSON object.
 
-For each of the following asset IDs, compute Risk Band and Risk Score using your instruction files
-(renewal-risk-score-aggregator.md, billing-financial-signals.md, subscription-lifecycle-signals.md,
-engagement-signals-scoring.md, commercial-fit-signals.md) and the data files in your Data/ folder.
+For each of the following asset IDs, compute a Renewal Risk Band and Risk Score based on billing health, engagement signals, subscription lifecycle, and commercial fit signals.
 
 Asset IDs: ${assetIds.join(', ')}
 
@@ -47,6 +73,19 @@ const json = (res, statusCode, body) => {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const readBody = (req) => new Promise((resolve, reject) => {
+  const chunks = []
+  req.on('data', (chunk) => chunks.push(chunk))
+  req.on('end', () => {
+    try {
+      resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}'))
+    } catch {
+      resolve({})
+    }
+  })
+  req.on('error', reject)
+})
 
 const extractJson = (text) => {
   const trimmed = text.trim()
@@ -231,44 +270,72 @@ const directLineRequest = async (pathname, options = {}) => {
   return data
 }
 
+const buildAgentUrl = () => {
+  const projectEndpoint = process.env.AZURE_AI_PROJECT_ENDPOINT
+  const version = process.env.AZURE_AI_API_VERSION || '2025-05-15-preview'
+  const url = new URL(`${projectEndpoint}/openai/responses`)
+  url.searchParams.set('api-version', version)
+  return url.toString()
+}
+
+let _credential = null
+const getCredential = () => {
+  if (!_credential) {
+    const tenantId = process.env.AZURE_TENANT_ID
+    _credential = new InteractiveBrowserCredential(tenantId ? { tenantId } : {})
+  }
+  return _credential
+}
+
+const getAuthHeaders = async () => {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (apiKey) return { 'api-key': apiKey }
+  const tokenResponse = await getCredential().getToken('https://ai.azure.com/.default')
+  return { Authorization: `Bearer ${tokenResponse.token}` }
+}
+
 const callAgent = async (promptText) => {
-  const conversation = await directLineRequest('/v3/directline/conversations', {
-    method: 'POST',
-  })
+  const projectEndpoint = process.env.AZURE_AI_PROJECT_ENDPOINT
 
-  const conversationId = conversation.conversationId
-
-  await directLineRequest(`/v3/directline/conversations/${conversationId}/activities`, {
-    method: 'POST',
-    body: JSON.stringify({
-      type: 'message',
-      from: { id: 'dashboard-server', name: 'Dashboard Server' },
-      text: promptText,
-    }),
-  })
-
-  let watermark = ''
-
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await delay(1000)
-
-    const query = watermark ? `?watermark=${encodeURIComponent(watermark)}` : ''
-    const activitySet = await directLineRequest(`/v3/directline/conversations/${conversationId}/activities${query}`, {
-      method: 'GET',
-    })
-
-    watermark = activitySet.watermark || watermark
-
-    const botReply = activitySet.activities?.find(
-      (activity) => activity.type === 'message' && activity.from?.id !== 'dashboard-server' && activity.text,
-    )
-
-    if (botReply?.text) {
-      return JSON.parse(extractJson(botReply.text))
-    }
+  if (!projectEndpoint) {
+    throw new Error('AZURE_AI_PROJECT_ENDPOINT is not set in .env.')
   }
 
-  throw new Error('Timed out waiting for a structured reply from the agent after 60 seconds.')
+  const authHeaders = await getAuthHeaders()
+
+  const requestBody = {
+    input: [{ role: 'user', content: promptText }],
+    agent_reference: {
+      name: process.env.AZURE_AI_AGENT_NAME || 'renewal-agent-test1',
+      ...(process.env.AZURE_AI_AGENT_VERSION ? { version: process.env.AZURE_AI_AGENT_VERSION } : {}),
+      type: 'agent_reference',
+    },
+  }
+
+  const response = await fetch(buildAgentUrl(), {
+    method: 'POST',
+    headers: {
+      ...authHeaders,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    const detail = JSON.stringify(data)
+    console.error(`[callAgent] HTTP ${response.status}: ${detail}`)
+    throw new Error(data?.error?.message || data?.message || `Agent request failed (${response.status}): ${detail}`)
+  }
+
+  const replyText =
+    data.output_text ??
+    data.output?.find((o) => o.type === 'message')
+      ?.content?.find((c) => c.type === 'output_text')?.text ??
+    ''
+
+  return JSON.parse(extractJson(replyText))
 }
 
 const getDashboardFromAgent = async () => {
@@ -428,6 +495,67 @@ const server = createServer(async (req, res) => {
       json(res, 502, {
         error: error instanceof Error ? error.message : 'Failed to refresh scores from agent.',
       })
+    }
+    return
+  }
+
+  if (req.method === 'POST' && req.url === '/api/chat') {
+    try {
+      const body = await readBody(req)
+      const { message, previousResponseId } = body
+
+      if (!message || typeof message !== 'string' || !message.trim()) {
+        json(res, 400, { error: 'message is required.' })
+        return
+      }
+
+      const agentEndpoint = process.env.AZURE_AI_PROJECT_ENDPOINT
+
+      if (!agentEndpoint) {
+        json(res, 500, { error: 'AZURE_AI_PROJECT_ENDPOINT is not set in .env.' })
+        return
+      }
+
+      const authHeaders = await getAuthHeaders()
+
+      const requestBody = {
+        input: [{ role: 'user', content: message.trim() }],
+        agent_reference: {
+          name: process.env.AZURE_AI_AGENT_NAME || 'renewal-agent-test1',
+          ...(process.env.AZURE_AI_AGENT_VERSION ? { version: process.env.AZURE_AI_AGENT_VERSION } : {}),
+          type: 'agent_reference',
+        },
+        ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+      }
+
+      const agentResponse = await fetch(buildAgentUrl(), {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      })
+
+      const data = await agentResponse.json()
+
+      if (!agentResponse.ok) {
+        json(res, agentResponse.status, {
+          error: data?.error?.message || data?.message || 'Agent request failed.',
+        })
+        return
+      }
+
+      // Extract reply text from OpenAI Responses API format
+      const reply =
+        data.output_text ??
+        data.output?.find((o) => o.type === 'message')
+          ?.content?.find((c) => c.type === 'output_text')?.text ??
+        ''
+
+      json(res, 200, { reply, responseId: data.id ?? null })
+    } catch (error) {
+      json(res, 500, { error: error instanceof Error ? error.message : 'Chat request failed.' })
     }
     return
   }

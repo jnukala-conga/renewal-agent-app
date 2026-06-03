@@ -1,56 +1,90 @@
-import { useEffect, useState } from 'react'
-import ReactWebChat, { createDirectLine } from 'botframework-webchat'
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
 
-const styleOptions = {
-  accent: '#5f6fd8',
-  backgroundColor: '#ffffff',
-  bubbleBackground: '#f3f6ff',
-  bubbleBorderRadius: 14,
-  bubbleFromUserBackground: '#5f6fd8',
-  bubbleFromUserBorderRadius: 14,
-  bubbleFromUserTextColor: '#ffffff',
-  disableFileUpload: true,
-  primaryFont: 'Segoe UI, sans-serif',
-  rootHeight: '100%',
-  rootWidth: '100%',
-  sendBoxBackground: '#ffffff',
-  sendBoxBorderTop: '1px solid #dfe7f8',
-  sendBoxButtonColor: '#5f6fd8',
-  sendBoxTextColor: '#283552',
+type Message = {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+type ChatResponse = {
+  reply?: string
+  responseId?: string
+  error?: string
 }
 
 export default function BotChat() {
-  const [directLine, setDirectLine] = useState<ReturnType<typeof createDirectLine> | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [previousResponseId, setPreviousResponseId] = useState<string | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    fetch('/api/directline/token')
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Token request failed: ${res.status} ${res.statusText}`)
-        }
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
 
-        return res.json()
-      })
-      .then((data) => {
-        setDirectLine(createDirectLine({ token: data.token }))
-      })
-      .catch((err: Error) => {
-        setError(`Failed to connect to agent: ${err.message}`)
-      })
-  }, [])
+  const sendMessage = async () => {
+    const text = input.trim()
+    if (!text || loading) return
 
-  if (error) {
-    return <div className="bot-chat-status bot-chat-status--error">{error}</div>
+    setInput('')
+    setError(null)
+    setMessages((prev) => [...prev, { role: 'user', text }])
+    setLoading(true)
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, previousResponseId }),
+      })
+      const data = (await res.json()) as ChatResponse
+      if (!res.ok) throw new Error(data.error || 'Chat request failed.')
+      setMessages((prev) => [...prev, { role: 'assistant', text: data.reply ?? '' }])
+      if (data.responseId) setPreviousResponseId(data.responseId)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to get a response.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  if (!directLine) {
-    return <div className="bot-chat-status">Connecting to agent...</div>
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      void sendMessage()
+    }
   }
 
   return (
     <div className="bot-chat-frame">
-      <ReactWebChat directLine={directLine} styleOptions={styleOptions} />
+      <div className="bot-chat-messages">
+        {messages.map((msg, i) => (
+          <div key={i} className={`bot-chat-bubble bot-chat-bubble--${msg.role}`}>
+            {msg.text}
+          </div>
+        ))}
+        {loading && (
+          <div className="bot-chat-bubble bot-chat-bubble--assistant bot-chat-bubble--loading">
+            Thinking…
+          </div>
+        )}
+        {error && <div className="bot-chat-status bot-chat-status--error">{error}</div>}
+        <div ref={bottomRef} />
+      </div>
+      <div className="bot-chat-input-row">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask about renewals…"
+          rows={1}
+          disabled={loading}
+        />
+        <button onClick={() => void sendMessage()} disabled={loading || !input.trim()}>
+          Send
+        </button>
+      </div>
     </div>
   )
 }
