@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react"
-import BotChat from "./BotChat"
+import BotChat, { type ChatMessage } from "./BotChat"
 import "./App.css"
+
+type ChatApiResponse = {
+  reply?: string
+  responseId?: string
+  error?: string
+}
 
 type Asset = {
   id: string
@@ -49,6 +55,37 @@ function App() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [chatExpanded, setChatExpanded] = useState(false)
   const closeModal = () => setActiveAsset(null)
+
+  // Shared chat state — both sidebar and modal use the same conversation
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [previousResponseId, setPreviousResponseId] = useState<string | null>(null)
+
+  const sendChatMessage = async () => {
+    const text = chatInput.trim()
+    if (!text || chatLoading) return
+    setChatInput('')
+    setChatError(null)
+    setChatMessages((prev) => [...prev, { role: 'user', text }])
+    setChatLoading(true)
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, previousResponseId }),
+      })
+      const data = (await res.json()) as ChatApiResponse
+      if (!res.ok) throw new Error(data.error || 'Chat request failed.')
+      setChatMessages((prev) => [...prev, { role: 'assistant', text: data.reply ?? '' }])
+      if (data.responseId) setPreviousResponseId(data.responseId)
+    } catch (err: unknown) {
+      setChatError(err instanceof Error ? err.message : 'Failed to get a response.')
+    } finally {
+      setChatLoading(false)
+    }
+  }
 
   useEffect(() => {
     let isDisposed = false
@@ -319,7 +356,14 @@ function App() {
                 </ul>
               </div>
 
-              <BotChat />
+              <BotChat
+                messages={chatMessages}
+                loading={chatLoading}
+                error={chatError}
+                input={chatInput}
+                onInputChange={setChatInput}
+                onSend={() => { void sendChatMessage() }}
+              />
             </div>
           </aside>
 
@@ -336,7 +380,14 @@ function App() {
               <button className="chat-modal-close" onClick={() => setChatExpanded(false)} aria-label="Collapse chat">&#10005;</button>
             </div>
             <div className="chat-modal-body">
-              <BotChat />
+              <BotChat
+                messages={chatMessages}
+                loading={chatLoading}
+                error={chatError}
+                input={chatInput}
+                onInputChange={setChatInput}
+                onSend={() => { void sendChatMessage() }}
+              />
             </div>
           </div>
         </div>

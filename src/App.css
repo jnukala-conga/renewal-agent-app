@@ -550,7 +550,7 @@ tbody tr.row-urgent:hover td { background: #fff6e6; }
 
 /* Bot chat embedded */
 .bot-chat-frame {
-  height: 300px;
+  height: 420px;
   overflow: hidden;
   background: #fff;
   display: flex;
@@ -571,10 +571,38 @@ tbody tr.row-urgent:hover td { background: #fff6e6; }
   border-radius: 12px;
   font-size: 12px;
   line-height: 1.45;
-  max-width: 86%;
+  max-width: 92%;
   word-break: break-word;
-  white-space: pre-wrap;
 }
+
+.bot-chat-bubble--assistant p { margin: 0 0 6px; }
+.bot-chat-bubble--assistant p:last-child { margin-bottom: 0; }
+.bot-chat-bubble--assistant ul,
+.bot-chat-bubble--assistant ol { margin: 0 0 6px; padding-left: 18px; }
+.bot-chat-bubble--assistant li { margin-bottom: 2px; }
+.bot-chat-bubble--assistant strong { font-weight: 700; }
+
+/* Markdown tables in chat */
+.bot-chat-bubble--assistant table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 6px 0;
+  font-size: 11.5px;
+}
+.bot-chat-bubble--assistant th,
+.bot-chat-bubble--assistant td {
+  border: 1px solid #d0d8f0;
+  padding: 5px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.bot-chat-bubble--assistant th {
+  background: #5f6fd8;
+  color: #fff;
+  font-weight: 600;
+}
+.bot-chat-bubble--assistant tr:nth-child(even) td { background: #eef1fd; }
+.bot-chat-bubble--assistant tr:hover td { background: #dde3f8; }
 
 .bot-chat-bubble--user {
   background: #5f6fd8;
@@ -642,6 +670,50 @@ tbody tr.row-urgent:hover td { background: #fff6e6; }
   color: #52607f;
 }
 .bot-chat-status--error { color: #d34d56; }
+
+/* Action chips — appear below assistant messages */
+.action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 4px 4px 6px 4px;
+  align-self: flex-start;
+  max-width: 92%;
+}
+
+.action-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.action-chip:hover  { opacity: 0.82; transform: translateY(-1px); }
+.action-chip:active { transform: translateY(0); }
+
+.action-chip--critical {
+  background: #fff0f0;
+  border-color: #f87171;
+  color: #dc2626;
+}
+.action-chip--warning {
+  background: #fffbeb;
+  border-color: #fbbf24;
+  color: #b45309;
+}
+.action-chip--ok {
+  background: #f0fdf4;
+  border-color: #4ade80;
+  color: #15803d;
+}
 
 /* ─────────────────────────────────────────────────
    Expandable Chat Modal

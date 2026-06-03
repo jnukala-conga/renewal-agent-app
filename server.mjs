@@ -38,31 +38,87 @@ const getKnowledgeBase = async () => {
 
 const port = Number(process.env.BOT_TOKEN_SERVER_PORT || 3978)
 
-let lastGroundedDashboard = null
+// Module-level CSV parser (handles quoted fields)
+const parseCsv = async (filename) => {
+  const text = await readFile(path.join(serverDir, 'public', filename), 'utf8')
+  const lines = text.trim().split(/\r?\n/)
+  const headers = lines[0].split(',').map((h) => h.trim())
+  return lines.slice(1).filter((l) => l.trim()).map((line) => {
+    const vals = []
+    let cur = '', inQ = false
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ
+      else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = '' }
+      else cur += ch
+    }
+    vals.push(cur.trim())
+    const rec = {}
+    headers.forEach((h, i) => { rec[h] = vals[i] ?? '' })
+    return rec
+  })
+}
+
+// Load and aggregate per-customer signals from all signal CSVs
+const getSignalContext = async (customerIds) => {
+  const idSet = new Set(customerIds)
+  const [
+    invoices, payments, disputes,
+    tickets, npsSurveys, usage,
+    subscriptions, renewals,
+  ] = await Promise.all([
+    parseCsv('invoices.csv'),
+    parseCsv('payment_attempts.csv'),
+    parseCsv('billing_disputes.csv'),
+    parseCsv('support_tickets.csv'),
+    parseCsv('nps_surveys.csv'),
+    parseCsv('product_usage.csv'),
+    parseCsv('subscriptions.csv'),
+    parseCsv('renewals.csv'),
+  ])
+
+  const result = {}
+  for (const cid of idSet) {
+    // Billing
+    const custInv = invoices.filter((i) => i.customer_id === cid)
+    const overdueInv = custInv.filter((i) => Number(i.due_past_by || 0) > 0 && !i.paid_at)
+    const overdueAmt = overdueInv.reduce((s, i) => s + Number(i.total_amount || 0), 0)
+    const failedPay = payments.filter((p) => p.customer_id === cid && p.status === 'failed')
+    const custDisp = disputes.filter((d) => d.customer_id === cid)
+    // Engagement
+    const openTkts = tickets.filter((t) => t.account_id === cid && t.status === 'Open')
+    const criticalTkts = openTkts.filter((t) => t.priority === 'High' || t.severity === 'P1' || t.severity === 'P2')
+    const custNps = npsSurveys.filter((n) => n.account_id === cid)
+      .sort((a, b) => new Date(b.survey_date) - new Date(a.survey_date))
+    const latestNps = custNps[0]
+    const totalSessions = usage.filter((u) => u.account_id === cid)
+      .reduce((s, u) => s + Number(u.session_count || 0), 0)
+    // Lifecycle
+    const custSubs = subscriptions.filter((s) => s.customer_id === cid)
+    const avgUtil = custSubs.length
+      ? Math.round(custSubs.reduce((s, sub) => {
+          const tot = Number(sub.license_count || 0)
+          return s + (tot > 0 ? (Number(sub.active_user_count || 0) / tot) * 100 : 0)
+        }, 0) / custSubs.length)
+      : null
+    const contractTypes = [...new Set(custSubs.map((s) => s.contract_type))].join('/')
+    const lateRen = renewals.filter(
+      (r) => r.customer_id === cid && (r.renewal_status === 'late' || r.renewal_status === 'negotiated')
+    )
+
+    result[cid] = [
+      `Billing: ${overdueInv.length} overdue invoice(s) $${overdueAmt.toFixed(0)}, ${failedPay.length} failed payment(s), ${custDisp.length} dispute(s)`,
+      `Engagement: ${openTkts.length} open ticket(s) (${criticalTkts.length} critical/high), NPS:${latestNps ? `${latestNps.score} ${latestNps.sentiment}` : 'N/A'}, sessions:${totalSessions}`,
+      `Lifecycle: license utilization ${avgUtil !== null ? avgUtil + '%' : 'N/A'} (${contractTypes}), ${lateRen.length} late/negotiated renewal(s)`,
+    ].join(' | ')
+  }
+  return result
+}
 
 // Parsed and joined asset data, cached after first load
 let _allJoinedAssets = null
+let _cachedDashboard = null  // last agent-scored dashboard, shared with chat context
 const getAllJoinedAssets = async () => {
   if (_allJoinedAssets) return _allJoinedAssets
-
-  const parseCsv = async (filename) => {
-    const text = await readFile(path.join(serverDir, 'public', filename), 'utf8')
-    const lines = text.trim().split(/\r?\n/)
-    const headers = lines[0].split(',').map((h) => h.trim())
-    return lines.slice(1).filter((l) => l.trim()).map((line) => {
-      const vals = []
-      let cur = '', inQ = false
-      for (const ch of line) {
-        if (ch === '"') inQ = !inQ
-        else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = '' }
-        else cur += ch
-      }
-      vals.push(cur.trim())
-      const rec = {}
-      headers.forEach((h, i) => { rec[h] = vals[i] ?? '' })
-      return rec
-    })
-  }
 
   const [customers, lineItems, grid] = await Promise.all([
     parseCsv('customers.csv'),
@@ -127,7 +183,31 @@ const buildContextForMessage = async (message) => {
     `ID:${a.id} | Customer:${a.customerName} | Product:${a.product} | Status:${a.status} | ExpiresInDays:${a.expiresInDays} | EndDate:${a.endDate} | ARR:${a.arr} | NetPrice:${a.netPrice} | DueAmount:${a.dueAmount} | TCV:${a.tcv} | RenewalAmt:${a.renewalAmt} | Term:${a.term}mo`
   ).join('\n')
 
-  return `[ASSET DATA — ${filtered.length} asset(s) matching your query]\n${rows}`
+  // Enrich with per-customer signals from all signal CSVs
+  const customerIds = [...new Set(filtered.map((a) => a.customerId))]
+  let signalBlock = ''
+  try {
+    const signals = await getSignalContext(customerIds)
+    signalBlock = '\n\n[CUSTOMER SIGNALS]\n' +
+      Object.entries(signals).map(([cid, s]) => `${cid}: ${s}`).join('\n')
+  } catch {
+    // non-fatal — agent can still use asset data
+  }
+
+  // Inject the agent-scored risk bands/scores from the last dashboard load
+  let scoreBlock = ''
+  if (_cachedDashboard) {
+    const scoreMap = new Map(_cachedDashboard.assets.map((a) => [a.id, a]))
+    const scored = filtered.map((a) => {
+      const s = scoreMap.get(a.id)
+      return s ? `${a.id}: RiskBand=${s.riskBand}, RiskScore=${s.riskScore}` : null
+    }).filter(Boolean)
+    if (scored.length) {
+      scoreBlock = '\n\n[AGENT-COMPUTED RISK SCORES — from last dashboard load]\n' + scored.join('\n')
+    }
+  }
+
+  return `[ASSET DATA — ${filtered.length} asset(s) matching your query]\n${rows}${signalBlock}${scoreBlock}`
 }
 
 // Convert joined asset record to assets_grid format for buildRiskPrompt
@@ -142,63 +222,6 @@ const joinedToGridFormat = (a) => ({
   'Renewal Amount': a.renewalAmt,
   'TCV': a.tcv,
 })
-
-// Detect if message is a data-analysis query that we can handle server-side
-const isDataQuery = (msg) => {
-  const lower = msg.toLowerCase()
-  return /score|risk|expir|rank|high risk|recommend|action|analyz|assess/.test(lower)
-}
-
-// Handle data queries by scoring filtered assets with the reliable dashboard approach
-const handleDataQuery = async (message) => {
-  const all = await getAllJoinedAssets()
-  const msg = message.toLowerCase()
-
-  // Extract expiry window
-  let maxDays = Infinity
-  const daysMatch = msg.match(/next\s+(\d+)\s+days?|(\d+)\s*days?/)
-  if (daysMatch) maxDays = Number(daysMatch[1] || daysMatch[2])
-
-  // Extract customer name mentions
-  const custNames = [...new Set(all.map((a) => a.customerName))]
-  const mentionedCustomers = custNames.filter((n) => msg.includes(n.toLowerCase()))
-
-  // Filter
-  let filtered = all
-  if (mentionedCustomers.length > 0) filtered = filtered.filter((a) => mentionedCustomers.includes(a.customerName))
-  if (maxDays < Infinity) filtered = filtered.filter((a) => a.expiresInDays <= maxDays)
-
-  // Only use local handling if we narrowed it down meaningfully
-  if (filtered.length === 0 || filtered.length === all.length) return null
-
-  // Score using the reliable prompt (data embedded, single request)
-  const gridAssets = filtered.map(joinedToGridFormat)
-  const scored = await callAgentWithRetry(buildRiskPrompt(gridAssets))
-  const scores = Array.isArray(scored.scores) ? scored.scores : []
-
-  // Sort by risk score descending
-  scores.sort((a, b) => (b['Risk Score'] || 0) - (a['Risk Score'] || 0))
-
-  // Build human-readable reply
-  const customerLabel = mentionedCustomers.length > 0 ? mentionedCustomers.join(', ') : 'All customers'
-  const expiryLabel = maxDays < Infinity ? `expiring within ${maxDays} days` : ''
-  const header = `**Renewal Risk Analysis** — ${customerLabel}${expiryLabel ? ` · ${expiryLabel}` : ''} (${scores.length} asset${scores.length !== 1 ? 's' : ''})\n\n`
-
-  const rows = scores.map((s, i) => {
-    const risk = s['Risk Band'] || 'Unknown'
-    const score = s['Risk Score'] || 0
-    const signals = Array.isArray(s['Risk Signals']) ? s['Risk Signals'].join('; ') : ''
-    const action = s['Recommended Action'] || ''
-    return `${i + 1}. **${s['Id']}** — ${risk} Risk (Score: ${score})\n   Signals: ${signals}\n   Action: ${action}`
-  }).join('\n\n')
-
-  const highRisk = scores.filter((s) => s['Risk Band'] === 'High')
-  const summary = highRisk.length > 0
-    ? `\n\n⚠️ **${highRisk.length} High Risk asset(s)** require immediate attention.`
-    : `\n\n✅ No High Risk assets in this filter.`
-
-  return header + rows + summary
-}
 
 const buildRiskPrompt = (assets) => {
   const assetTable = assets.map((a) => [
@@ -536,30 +559,14 @@ const callAgentWithRetry = async (promptText, maxRetries = 3) => {
 
 const getDashboardFromCsv = async () => {
   const csvAssets = await loadCsvAssets()
-
-  // Attempt to score assets via agent (one request, data embedded)
-  let scoreMap = new Map()
-  let trendingActions = []
-  try {
-    const agentResponse = await callAgentWithRetry(buildRiskPrompt(csvAssets))
-    if (Array.isArray(agentResponse.scores)) {
-      scoreMap = new Map(agentResponse.scores.map((s) => [s['Id'], s]))
-    }
-    if (Array.isArray(agentResponse.trendingActions)) {
-      trendingActions = agentResponse.trendingActions.map(String).filter(Boolean)
-    }
-    console.log(`[getDashboardFromCsv] agent scored ${scoreMap.size} assets`)
-  } catch (err) {
-    console.error('[getDashboardFromCsv] agent scoring failed, using CSV defaults:', err.message)
-  }
+  const agentResponse = await callAgentWithRetry(buildRiskPrompt(csvAssets))
+  const scores = Array.isArray(agentResponse.scores) ? agentResponse.scores : []
+  const scoreMap = new Map(scores.map((s) => [s['Id'], s]))
 
   const assets = csvAssets.map((row) => {
-    const score = scoreMap.get(row['Id']) || {}
-    let riskBand = 'Medium'
-    try {
-      riskBand = normalizeRisk(readTextField(score, ['Risk Band'], 'Medium'))
-    } catch { /* keep Medium */ }
-
+    const s = scoreMap.get(row['Id']) || {}
+    let riskBand = 'Low'
+    try { riskBand = normalizeRisk(s['Risk Band'] || 'Low') } catch { /* keep Low */ }
     return {
       id: row['Id'],
       assetName: row['Asset Name'],
@@ -572,20 +579,39 @@ const getDashboardFromCsv = async () => {
       renewalAmount: parseCsvNumber(row['Renewal Amount']),
       upsellOpportunityAmount: parseCsvNumber(row['Upsell Opportunity Amount']),
       riskBand,
-      riskScore: readNumberField(score, ['Risk Score'], deriveRiskScore(riskBand)),
-      riskSignals: Array.isArray(score['Risk Signals']) ? score['Risk Signals'].map(String).filter(Boolean) : [],
-      recommendedAction: readTextField(score, ['Recommended Action'], ''),
+      riskScore: Number(s['Risk Score'] ?? deriveRiskScore(riskBand)),
+      riskSignals: Array.isArray(s['Risk Signals']) ? s['Risk Signals'].map(String) : [],
+      recommendedAction: s['Recommended Action'] ?? '',
     }
   })
 
-  return { assets, trendingActions, syncedAt: new Date().toISOString() }
+  const trendingActions = Array.isArray(agentResponse.trendingActions)
+    ? agentResponse.trendingActions.map(String).filter(Boolean)
+    : []
+
+  const result = { assets, trendingActions, syncedAt: new Date().toISOString() }
+  _cachedDashboard = result  // cache for chat context
+  return result
 }
 
-const getStableDashboard = async () => {
-  if (lastGroundedDashboard) return lastGroundedDashboard
-  const dashboard = await getDashboardFromCsv()
-  lastGroundedDashboard = dashboard
-  return dashboard
+// Convert raw JSON agent response into human-readable markdown (safety net)
+const formatChatReply = (text) => {
+  const trimmed = (text || '').trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return trimmed
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (!Array.isArray(parsed.scores)) return trimmed
+    const rows = parsed.scores.map((s, i) => {
+      const signals = Array.isArray(s['Risk Signals']) ? s['Risk Signals'].join('; ') : ''
+      return `${i + 1}. **${s['Id']}** — ${s['Risk Band']} Risk (Score: ${s['Risk Score']})\n   Signals: ${signals}\n   Action: ${s['Recommended Action'] ?? ''}`
+    }).join('\n\n')
+    const trending = Array.isArray(parsed.trendingActions) && parsed.trendingActions.length
+      ? '\n\n**Trending Actions:**\n' + parsed.trendingActions.map((a) => `- ${a}`).join('\n')
+      : ''
+    return `**Renewal Risk Analysis** (${parsed.scores.length} assets)\n\n${rows}${trending}`
+  } catch {
+    return trimmed
+  }
 }
 
 const server = createServer(async (req, res) => {
@@ -637,7 +663,7 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/api/dashboard') {
     try {
-      const dashboard = await getStableDashboard()
+      const dashboard = await getDashboardFromCsv()
       json(res, 200, dashboard)
     } catch (error) {
       json(res, 502, {
@@ -648,10 +674,8 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && req.url === '/api/dashboard/refresh') {
-    lastGroundedDashboard = null
     try {
       const dashboard = await getDashboardFromCsv()
-      lastGroundedDashboard = dashboard
       json(res, 200, dashboard)
     } catch (error) {
       json(res, 502, {
@@ -678,27 +702,15 @@ const server = createServer(async (req, res) => {
         return
       }
 
-      const authHeaders = await getAuthHeaders()
-
-      // On first message: try server-side data query handling first (avoids agent tool timeouts)
       let userContent = message.trim()
-      if (!previousResponseId && isDataQuery(message)) {
-        try {
-          const dataReply = await handleDataQuery(message)
-          if (dataReply) {
-            json(res, 200, { reply: dataReply, responseId: null })
-            return
-          }
-        } catch (err) {
-          console.error('[chat] data query handler failed, falling back to agent:', err.message)
-        }
-      }
+
+      const authHeaders = await getAuthHeaders()
 
       // Inject filtered asset context for first-turn agent calls
       if (!previousResponseId) {
         try {
           const ctx = await buildContextForMessage(message)
-          userContent = `${ctx}\n\nUser question: ${userContent}`
+          userContent = `${ctx}\n\n[Instructions: Always respond using GitHub-Flavored Markdown. When presenting asset lists, risk scores, or any tabular data use a proper markdown table (pipe-delimited columns with a header row and separator). Never output raw JSON.]\n\nUser question: ${userContent}`
         } catch {
           // non-fatal
         }
@@ -733,11 +745,14 @@ const server = createServer(async (req, res) => {
       }
 
       // Extract reply text from OpenAI Responses API format
-      const reply =
+      const rawReply =
         data.output_text ??
         data.output?.find((o) => o.type === 'message')
           ?.content?.find((c) => c.type === 'output_text')?.text ??
         ''
+
+      // If agent returned raw JSON, format it into human-readable markdown
+      const reply = formatChatReply(rawReply)
 
       json(res, 200, { reply, responseId: data.id ?? null })
     } catch (error) {
