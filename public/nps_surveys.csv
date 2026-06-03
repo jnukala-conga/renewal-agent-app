@@ -1,0 +1,11 @@
+survey_id,account_id,contact_email,score,sentiment,survey_date,survey_type,feedback
+NPS-001,CUST-001,jsmith@acmecorp.com,5,Detractor,2026-04-10,Quarterly,"Product is frustrating. Integrations keep breaking and support takes too long."
+NPS-002,CUST-001,cthompson@globaltech.com,2,Detractor,2026-03-15,Quarterly,"We are actively evaluating alternatives. Multiple critical outages are unacceptable."
+NPS-003,CUST-001,amorgan@sunrise.com,9,Promoter,2026-05-01,Quarterly,"Great product and excellent support team. Looking forward to new features."
+NPS-004,CUST-001,gclark@peaksolutions.com,7,Passive,2026-04-20,Onboarding,"Mostly happy. A few rough edges with the setup that the team helped us through."
+NPS-005,CUST-001,rscott@nexuscorp.com,3,Detractor,2026-04-05,Quarterly,"We cannot get the core functionality working. Feel abandoned by the support team."
+NPS-006,CUST-001,iking@bluestar.com,10,Promoter,2026-05-15,Quarterly,"We love this platform. Has transformed how our analytics team operates."
+NPS-007,CUST-001,hperez@vertexinc.com,6,Detractor,2026-04-28,Quarterly,"Too many bugs and performance issues this quarter. Renewal is uncertain."
+NPS-008,CUST-001,zbaker@quantum.com,7,Passive,2026-05-10,Quarterly,"Solid product overall. Some reliability concerns but support has been responsive."
+NPS-009,CUST-001,vperez@atlasgroup.com,1,Detractor,2026-05-20,Quarterly,"This has been a disaster. We have lost data and cannot trust the platform. We are leaving."
+NPS-010,CUST-001,zjohnson@meridian.com,10,Promoter,2026-05-25,Quarterly,"Best business software we use. Team is fantastic and product keeps getting better."

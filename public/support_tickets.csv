@@ -1,0 +1,92 @@
+ticket_id,account_id,subject,status,priority,severity,category,created_date,closed_date
+TKT-001,CUST-001,Integration failing with ERP sync,Open,High,P2,Integration,2026-03-05,
+TKT-002,CUST-001,Dashboard not loading for admin users,Closed,Medium,P3,Product Bug,2026-03-12,2026-03-20
+TKT-003,CUST-001,Invoice PDF export broken,Closed,Low,P4,Billing,2026-03-18,2026-03-25
+TKT-004,CUST-001,API rate limit errors in production,Open,High,P2,API,2026-03-28,
+TKT-005,CUST-001,Bulk upload fails on files >10MB,Open,Medium,P3,Product Bug,2026-04-02,
+TKT-006,CUST-001,SSO login intermittently failing,Open,Critical,P1,Authentication,2026-04-10,
+TKT-007,CUST-001,Reports showing stale data,Closed,Medium,P3,Reporting,2026-04-15,2026-04-22
+TKT-008,CUST-001,Permission roles not saving correctly,Open,High,P2,Access Control,2026-04-20,
+TKT-009,CUST-001,Mobile app crashes on iOS 18,Open,Medium,P3,Mobile,2026-04-28,
+TKT-010,CUST-001,Data export taking >30 minutes,Open,High,P2,Performance,2026-05-05,
+TKT-011,CUST-001,Workflow automation rules not triggering,Open,High,P2,Automation,2026-05-12,
+TKT-012,CUST-001,Email notifications not sending,Open,Medium,P3,Notifications,2026-05-20,
+TKT-013,CUST-001,Complete system outage for 3 hours,Closed,Critical,P1,Outage,2026-03-02,2026-03-03
+TKT-014,CUST-001,Data migration errors post-upgrade,Open,Critical,P1,Migration,2026-03-05,
+TKT-015,CUST-001,Authentication tokens expiring prematurely,Open,High,P2,Authentication,2026-03-10,
+TKT-016,CUST-001,Billing module completely inaccessible,Open,Critical,P1,Billing,2026-03-14,
+TKT-017,CUST-001,Custom fields data loss after update,Open,Critical,P1,Data Loss,2026-03-20,
+TKT-018,CUST-001,Performance degradation >80% on peak hours,Open,High,P2,Performance,2026-03-25,
+TKT-019,CUST-001,Bulk actions silently failing,Open,High,P2,Product Bug,2026-04-01,
+TKT-020,CUST-001,Audit log gaps detected,Open,High,P2,Compliance,2026-04-08,
+TKT-021,CUST-001,Third-party webhook integrations broken,Open,High,P2,Integration,2026-04-14,
+TKT-022,CUST-001,User provisioning stuck in pending state,Open,Medium,P3,User Management,2026-04-20,
+TKT-023,CUST-001,Contract PDF generation failing,Open,Medium,P3,Documents,2026-04-26,
+TKT-024,CUST-001,Search returning incorrect results,Open,Medium,P3,Search,2026-05-02,
+TKT-025,CUST-001,Dashboard widgets not refreshing,Open,Medium,P3,UI,2026-05-08,
+TKT-026,CUST-001,Export to Excel includes deleted records,Open,Low,P4,Reporting,2026-05-14,
+TKT-027,CUST-001,API documentation out of date,Open,Low,P4,Documentation,2026-05-18,
+TKT-028,CUST-001,Notification center showing duplicates,Open,Low,P4,Notifications,2026-05-22,
+TKT-029,CUST-001,Settings page layout broken on Firefox,Open,Low,P4,UI,2026-05-26,
+TKT-030,CUST-001,Mobile login flow not working on Android,Open,Medium,P3,Mobile,2026-05-28,
+TKT-031,CUST-001,Feature request: bulk archive option,Closed,Low,P4,Feature Request,2026-05-10,2026-05-20
+TKT-032,CUST-001,Setup guide missing screenshots,Closed,Low,P4,Documentation,2026-03-15,2026-03-18
+TKT-033,CUST-001,CSV import not parsing date formats correctly,Open,Medium,P3,Import,2026-04-02,
+TKT-034,CUST-001,Role-based dashboard not loading,Open,Medium,P3,UI,2026-04-18,
+TKT-035,CUST-001,Training video links returning 404,Closed,Low,P4,Documentation,2026-05-01,2026-05-05
+TKT-036,CUST-001,Notification emails going to spam,Open,Low,P4,Email,2026-05-10,
+TKT-037,CUST-001,Scheduled report not delivering,Open,Medium,P3,Reporting,2026-05-22,
+TKT-038,CUST-001,Onboarding steps not completing,Open,High,P2,Onboarding,2026-03-22,
+TKT-039,CUST-001,API key generation broken,Open,Critical,P1,API,2026-03-28,
+TKT-040,CUST-001,Payment gateway not connecting,Open,Critical,P1,Billing,2026-04-03,
+TKT-041,CUST-001,User invitation emails not arriving,Open,High,P2,User Management,2026-04-10,
+TKT-042,CUST-001,Product configuration wizard crashing,Open,High,P2,Product Bug,2026-04-18,
+TKT-043,CUST-001,Data sync with source system failing,Open,Critical,P1,Integration,2026-04-25,
+TKT-044,CUST-001,Login page not loading on VPN,Open,High,P2,Authentication,2026-05-03,
+TKT-045,CUST-001,Permissions not applying to new users,Open,High,P2,Access Control,2026-05-10,
+TKT-046,CUST-001,Reports generating empty PDFs,Open,Medium,P3,Reporting,2026-05-15,
+TKT-047,CUST-001,Custom workflow not saving,Open,High,P2,Automation,2026-05-20,
+TKT-048,CUST-001,Team hierarchy view broken,Open,Medium,P3,UI,2026-05-24,
+TKT-049,CUST-001,All exports timing out,Open,Critical,P1,Performance,2026-05-27,
+TKT-050,CUST-001,Notifications going to wrong recipients,Open,Medium,P3,Notifications,2026-05-28,
+TKT-051,CUST-001,Help center search not returning results,Open,Low,P4,Documentation,2026-05-29,
+TKT-052,CUST-001,Question about new Q3 roadmap features,Closed,Low,P4,General,2026-04-10,2026-04-12
+TKT-053,CUST-001,Minor UI alignment issue on list view,Closed,Low,P4,UI,2026-05-15,2026-05-17
+TKT-054,CUST-001,Integration with Salesforce timing out,Open,High,P2,Integration,2026-03-15,
+TKT-055,CUST-001,Custom report filters not saving,Closed,Medium,P3,Reporting,2026-03-22,2026-04-01
+TKT-056,CUST-001,Bulk user import failing on row 500+,Open,High,P2,User Management,2026-03-30,
+TKT-057,CUST-001,Contract approval workflow stuck,Open,Critical,P1,Workflow,2026-04-05,
+TKT-058,CUST-001,Dashboard performance degraded,Open,High,P2,Performance,2026-04-12,
+TKT-059,CUST-001,PDF templates not applying branding,Open,Medium,P3,Documents,2026-04-20,
+TKT-060,CUST-001,Email signature not rendering in outbound,Closed,Low,P4,Email,2026-04-28,2026-05-05
+TKT-061,CUST-001,Two-factor auth not working for some users,Open,High,P2,Authentication,2026-05-05,
+TKT-062,CUST-001,Data export missing 3 custom fields,Open,Medium,P3,Export,2026-05-12,
+TKT-063,CUST-001,Admin audit trail incomplete,Open,High,P2,Compliance,2026-05-20,
+TKT-064,CUST-001,Mobile app crashing on login,Open,High,P2,Mobile,2026-05-26,
+TKT-065,CUST-001,API endpoint returning 500 errors intermittently,Closed,High,P2,API,2026-03-10,2026-03-18
+TKT-066,CUST-001,Multi-currency rounding issue,Open,Medium,P3,Billing,2026-03-25,
+TKT-067,CUST-001,User session timing out too quickly,Closed,Medium,P3,Authentication,2026-04-05,2026-04-15
+TKT-068,CUST-001,Chart visualizations not rendering in Safari,Open,Low,P4,UI,2026-04-18,
+TKT-069,CUST-001,Scheduled jobs not running at configured time,Open,High,P2,Automation,2026-04-28,
+TKT-070,CUST-001,Bulk delete taking >10 minutes,Open,Medium,P3,Performance,2026-05-10,
+TKT-071,CUST-001,SAML SSO config not accepting IdP metadata,Open,High,P2,Authentication,2026-05-22,
+TKT-072,CUST-001,Full platform outage — no access for any user,Closed,Critical,P1,Outage,2026-03-02,2026-03-02
+TKT-073,CUST-001,Post-outage data corruption detected,Open,Critical,P1,Data Loss,2026-03-04,
+TKT-074,CUST-001,Complete loss of transaction history,Open,Critical,P1,Data Loss,2026-03-08,
+TKT-075,CUST-001,Billing system disconnected from ERP,Open,Critical,P1,Integration,2026-03-12,
+TKT-076,CUST-001,User accounts inaccessible for entire org,Closed,Critical,P1,Access Control,2026-03-15,2026-03-16
+TKT-077,CUST-001,Compliance reports not generating,Open,Critical,P1,Compliance,2026-03-20,
+TKT-078,CUST-001,API completely unresponsive,Open,Critical,P1,API,2026-03-26,
+TKT-079,CUST-001,All workflow automations disabled,Open,High,P2,Automation,2026-04-01,
+TKT-080,CUST-001,Executive dashboard not loading,Open,High,P2,UI,2026-04-08,
+TKT-081,CUST-001,Document signing integration broken,Open,High,P2,Integration,2026-04-15,
+TKT-082,CUST-001,Custom roles permissions reset,Open,High,P2,Access Control,2026-04-22,
+TKT-083,CUST-001,Audit logs missing entries since March,Open,High,P2,Compliance,2026-04-28,
+TKT-084,CUST-001,Notifications not triggering for approvals,Open,Medium,P3,Notifications,2026-05-05,
+TKT-085,CUST-001,Multi-office location data out of sync,Open,Medium,P3,Data Sync,2026-05-10,
+TKT-086,CUST-001,Search index not rebuilding after import,Open,Medium,P3,Search,2026-05-15,
+TKT-087,CUST-001,Performance degradation on list views,Open,High,P2,Performance,2026-05-18,
+TKT-088,CUST-001,PDF generation queue backlogged,Open,Medium,P3,Documents,2026-05-21,
+TKT-089,CUST-001,Calendar integration stopped syncing,Open,Medium,P3,Integration,2026-05-24,
+TKT-090,CUST-001,Mobile push notifications not delivered,Open,Low,P4,Mobile,2026-05-27,
+TKT-091,CUST-001,Minor spacing issue on summary report,Closed,Low,P4,UI,2026-05-20,2026-05-21

@@ -1,0 +1,2 @@
+customer_id,name,industry,tier,annual_revenue,acv,total_arr,created_at
+CUST-001,Acme Corp,Technology,Enterprise,75000000,764760,764760,2019-01-01T00:00:00Z
