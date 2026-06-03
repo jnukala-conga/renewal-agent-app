@@ -3,7 +3,7 @@ import dotenv from 'dotenv'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { InteractiveBrowserCredential } from '@azure/identity'
+import { AzureCliCredential, ChainedTokenCredential, InteractiveBrowserCredential } from '@azure/identity'
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -40,32 +40,213 @@ const port = Number(process.env.BOT_TOKEN_SERVER_PORT || 3978)
 
 let lastGroundedDashboard = null
 
-const buildRiskPrompt = (assetIds) => `Reply with JSON only. No explanation, no markdown, just the JSON object.
+// Parsed and joined asset data, cached after first load
+let _allJoinedAssets = null
+const getAllJoinedAssets = async () => {
+  if (_allJoinedAssets) return _allJoinedAssets
 
-For each of the following asset IDs, compute a Renewal Risk Band and Risk Score based on billing health, engagement signals, subscription lifecycle, and commercial fit signals.
+  const parseCsv = async (filename) => {
+    const text = await readFile(path.join(serverDir, 'public', filename), 'utf8')
+    const lines = text.trim().split(/\r?\n/)
+    const headers = lines[0].split(',').map((h) => h.trim())
+    return lines.slice(1).filter((l) => l.trim()).map((line) => {
+      const vals = []
+      let cur = '', inQ = false
+      for (const ch of line) {
+        if (ch === '"') inQ = !inQ
+        else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = '' }
+        else cur += ch
+      }
+      vals.push(cur.trim())
+      const rec = {}
+      headers.forEach((h, i) => { rec[h] = vals[i] ?? '' })
+      return rec
+    })
+  }
 
-Asset IDs: ${assetIds.join(', ')}
+  const [customers, lineItems, grid] = await Promise.all([
+    parseCsv('customers.csv'),
+    parseCsv('asset_line_items.csv'),
+    parseCsv('assets_grid.csv'),
+  ])
 
-Return this exact shape:
+  const custMap = new Map(customers.map((c) => [c['customer_id'], { name: c['name'], industry: c['industry'], tier: c['tier'] }]))
+  const gridMap = new Map(grid.map((g) => [g['Id'], g]))
+
+  _allJoinedAssets = lineItems.map((a) => {
+    const g = gridMap.get(a['asset_line_item_id']) || {}
+    const cust = custMap.get(a['account_id']) || {}
+    return {
+      id: a['asset_line_item_id'],
+      customerId: a['account_id'],
+      customerName: cust.name || a['account_id'],
+      industry: cust.industry || '',
+      tier: cust.tier || '',
+      product: a['product_name'],
+      status: a['status'],
+      endDate: a['end_date'],
+      expiresInDays: Number(g['Expires In Days'] || 999),
+      arr: a['arr'],
+      netPrice: a['net_price'],
+      dueAmount: g['Due Amount'] || '0',
+      tcv: a['tcv'],
+      renewalAmt: g['Renewal Amount'] || '',
+      term: a['selling_term'],
+    }
+  })
+
+  return _allJoinedAssets
+}
+
+// Build a focused context string for a user query by filtering to relevant assets
+const buildContextForMessage = async (message) => {
+  const all = await getAllJoinedAssets()
+  const msg = message.toLowerCase()
+
+  // Extract expiry window (default none = all)
+  let maxDays = Infinity
+  const daysMatch = msg.match(/next\s+(\d+)\s+days?|(\d+)\s*days?/)
+  if (daysMatch) maxDays = Number(daysMatch[1] || daysMatch[2])
+
+  // Extract customer name mentions
+  const custNames = [...new Set(all.map((a) => a.customerName))]
+  const mentionedCustomers = custNames.filter((n) => msg.includes(n.toLowerCase()))
+
+  // Filter assets
+  let filtered = all
+  if (mentionedCustomers.length > 0) {
+    filtered = filtered.filter((a) => mentionedCustomers.includes(a.customerName))
+  }
+  if (maxDays < Infinity) {
+    filtered = filtered.filter((a) => a.expiresInDays <= maxDays)
+  }
+  // Fallback: show all if no filter matched
+  if (filtered.length === 0) filtered = all
+
+  const rows = filtered.map((a) =>
+    `ID:${a.id} | Customer:${a.customerName} | Product:${a.product} | Status:${a.status} | ExpiresInDays:${a.expiresInDays} | EndDate:${a.endDate} | ARR:${a.arr} | NetPrice:${a.netPrice} | DueAmount:${a.dueAmount} | TCV:${a.tcv} | RenewalAmt:${a.renewalAmt} | Term:${a.term}mo`
+  ).join('\n')
+
+  return `[ASSET DATA — ${filtered.length} asset(s) matching your query]\n${rows}`
+}
+
+// Convert joined asset record to assets_grid format for buildRiskPrompt
+const joinedToGridFormat = (a) => ({
+  'Id': a.id,
+  'Asset Name': `${a.product} (${a.customerName})`,
+  'Net Price': a.netPrice,
+  'ARR': a.arr,
+  'Due Amount': a.dueAmount,
+  'Expires In Days': String(a.expiresInDays),
+  'Term': String(a.term),
+  'Renewal Amount': a.renewalAmt,
+  'TCV': a.tcv,
+})
+
+// Detect if message is a data-analysis query that we can handle server-side
+const isDataQuery = (msg) => {
+  const lower = msg.toLowerCase()
+  return /score|risk|expir|rank|high risk|recommend|action|analyz|assess/.test(lower)
+}
+
+// Handle data queries by scoring filtered assets with the reliable dashboard approach
+const handleDataQuery = async (message) => {
+  const all = await getAllJoinedAssets()
+  const msg = message.toLowerCase()
+
+  // Extract expiry window
+  let maxDays = Infinity
+  const daysMatch = msg.match(/next\s+(\d+)\s+days?|(\d+)\s*days?/)
+  if (daysMatch) maxDays = Number(daysMatch[1] || daysMatch[2])
+
+  // Extract customer name mentions
+  const custNames = [...new Set(all.map((a) => a.customerName))]
+  const mentionedCustomers = custNames.filter((n) => msg.includes(n.toLowerCase()))
+
+  // Filter
+  let filtered = all
+  if (mentionedCustomers.length > 0) filtered = filtered.filter((a) => mentionedCustomers.includes(a.customerName))
+  if (maxDays < Infinity) filtered = filtered.filter((a) => a.expiresInDays <= maxDays)
+
+  // Only use local handling if we narrowed it down meaningfully
+  if (filtered.length === 0 || filtered.length === all.length) return null
+
+  // Score using the reliable prompt (data embedded, single request)
+  const gridAssets = filtered.map(joinedToGridFormat)
+  const scored = await callAgentWithRetry(buildRiskPrompt(gridAssets))
+  const scores = Array.isArray(scored.scores) ? scored.scores : []
+
+  // Sort by risk score descending
+  scores.sort((a, b) => (b['Risk Score'] || 0) - (a['Risk Score'] || 0))
+
+  // Build human-readable reply
+  const customerLabel = mentionedCustomers.length > 0 ? mentionedCustomers.join(', ') : 'All customers'
+  const expiryLabel = maxDays < Infinity ? `expiring within ${maxDays} days` : ''
+  const header = `**Renewal Risk Analysis** — ${customerLabel}${expiryLabel ? ` · ${expiryLabel}` : ''} (${scores.length} asset${scores.length !== 1 ? 's' : ''})\n\n`
+
+  const rows = scores.map((s, i) => {
+    const risk = s['Risk Band'] || 'Unknown'
+    const score = s['Risk Score'] || 0
+    const signals = Array.isArray(s['Risk Signals']) ? s['Risk Signals'].join('; ') : ''
+    const action = s['Recommended Action'] || ''
+    return `${i + 1}. **${s['Id']}** — ${risk} Risk (Score: ${score})\n   Signals: ${signals}\n   Action: ${action}`
+  }).join('\n\n')
+
+  const highRisk = scores.filter((s) => s['Risk Band'] === 'High')
+  const summary = highRisk.length > 0
+    ? `\n\n⚠️ **${highRisk.length} High Risk asset(s)** require immediate attention.`
+    : `\n\n✅ No High Risk assets in this filter.`
+
+  return header + rows + summary
+}
+
+const buildRiskPrompt = (assets) => {
+  const assetTable = assets.map((a) => [
+    `Asset ID: ${a['Id']}`,
+    `Name: ${a['Asset Name']}`,
+    `Net Price: ${a['Net Price']}`,
+    `ARR: ${a['ARR']}`,
+    `Due Amount: ${a['Due Amount']}`,
+    `Expires In Days: ${a['Expires In Days']}`,
+    `Term: ${a['Term']}`,
+    `Renewal Amount: ${a['Renewal Amount']}`,
+    `TCV: ${a['TCV']}`,
+  ].join(' | ')).join('\n')
+
+  return `Reply with JSON only. No explanation, no markdown, just the JSON object.
+
+You are a renewal risk analyst. Based on the asset data below, compute a Renewal Risk Band and Risk Score for each asset using billing health, engagement, and subscription lifecycle signals.
+
+ASSETS:
+${assetTable}
+
+Scoring rules:
+- Due Amount > 0 → billing risk (higher = worse)
+- Expires In Days < 30 → urgency risk
+- Low ARR relative to Net Price → financial mismatch
+- Risk Band: Low (0-40), Medium (41-70), High (71-100)
+- Map any "Critical" to "High"
+
+Return this exact JSON shape:
 {
   "scores": [
     {
       "Id": "ALI-001",
       "Risk Band": "Medium",
       "Risk Score": 73,
-      "Risk Signals": ["45 days overdue invoice ($2.9K outstanding)", "Primary contacts had 0 logins in last 60 days"],
-      "Recommended Action": "NORMAL: Proactive outreach before renewal"
+      "Risk Signals": ["$2.9K outstanding balance", "Expires in 12 days"],
+      "Recommended Action": "URGENT: Immediate outreach required"
     }
   ],
-  "trendingActions": ["URGENT: Action"]
+  "trendingActions": ["URGENT: 3 assets expire within 30 days"]
 }
 
 Rules:
-- Risk Band must be Low, Medium, or High (map Critical to High).
-- Risk Score must be an integer between 0 and 100.
-- Risk Signals must be an array of 2-4 brief plain-English signals that explain the score (e.g. billing issues, low engagement, expiry urgency, support tickets). Be specific using the asset data.
-- Return exactly one entry per asset ID provided.
+- Return exactly one entry per asset.
+- Risk Score is an integer 0-100.
+- Risk Signals: 2-4 specific signals using the actual data values.
 - No invented IDs.`
+}
 
 const json = (res, statusCode, body) => {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' })
@@ -282,14 +463,15 @@ let _credential = null
 const getCredential = () => {
   if (!_credential) {
     const tenantId = process.env.AZURE_TENANT_ID
-    _credential = new InteractiveBrowserCredential(tenantId ? { tenantId } : {})
+    _credential = new ChainedTokenCredential(
+      new AzureCliCredential(tenantId ? { tenantId } : {}),
+      new InteractiveBrowserCredential(tenantId ? { tenantId } : {}),
+    )
   }
   return _credential
 }
 
 const getAuthHeaders = async () => {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (apiKey) return { 'api-key': apiKey }
   const tokenResponse = await getCredential().getToken('https://ai.azure.com/.default')
   return { Authorization: `Bearer ${tokenResponse.token}` }
 }
@@ -338,25 +520,45 @@ const callAgent = async (promptText) => {
   return JSON.parse(extractJson(replyText))
 }
 
-const getDashboardFromAgent = async () => {
-  // Load asset data from local CSV (ground truth — no hallucination)
+const callAgentWithRetry = async (promptText, maxRetries = 3) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await callAgent(promptText)
+    } catch (err) {
+      const isRetryable = err.message?.includes('rate_limit') || err.message?.includes('server_error') || err.message?.includes('timeout') || err.message?.includes('Timeout')
+      if (!isRetryable || attempt === maxRetries) throw err
+      const backoff = attempt * 5000
+      console.log(`[callAgentWithRetry] attempt ${attempt} failed, retrying in ${backoff}ms...`)
+      await delay(backoff)
+    }
+  }
+}
+
+const getDashboardFromCsv = async () => {
   const csvAssets = await loadCsvAssets()
-  const assetIds = csvAssets.map((a) => a['Id'])
 
-  // Ask agent only for Risk Band, Risk Score, Recommended Action
-  const agentResponse = await callAgent(buildRiskPrompt(assetIds))
-
-  const scores = Array.isArray(agentResponse.scores) ? agentResponse.scores : []
-  const scoreMap = new Map(scores.map((s) => [s['Id'], s]))
+  // Attempt to score assets via agent (one request, data embedded)
+  let scoreMap = new Map()
+  let trendingActions = []
+  try {
+    const agentResponse = await callAgentWithRetry(buildRiskPrompt(csvAssets))
+    if (Array.isArray(agentResponse.scores)) {
+      scoreMap = new Map(agentResponse.scores.map((s) => [s['Id'], s]))
+    }
+    if (Array.isArray(agentResponse.trendingActions)) {
+      trendingActions = agentResponse.trendingActions.map(String).filter(Boolean)
+    }
+    console.log(`[getDashboardFromCsv] agent scored ${scoreMap.size} assets`)
+  } catch (err) {
+    console.error('[getDashboardFromCsv] agent scoring failed, using CSV defaults:', err.message)
+  }
 
   const assets = csvAssets.map((row) => {
     const score = scoreMap.get(row['Id']) || {}
-    let riskBand
+    let riskBand = 'Medium'
     try {
-      riskBand = normalizeRisk(readTextField(score, ['Risk Band'], 'Low'))
-    } catch {
-      riskBand = 'Low'
-    }
+      riskBand = normalizeRisk(readTextField(score, ['Risk Band'], 'Medium'))
+    } catch { /* keep Medium */ }
 
     return {
       id: row['Id'],
@@ -376,51 +578,14 @@ const getDashboardFromAgent = async () => {
     }
   })
 
-  const trendingActions = Array.isArray(agentResponse.trendingActions)
-    ? agentResponse.trendingActions.map((item) => String(item)).filter(Boolean)
-    : []
-
-  return {
-    assets,
-    trendingActions,
-    syncedAt: new Date().toISOString(),
-  }
+  return { assets, trendingActions, syncedAt: new Date().toISOString() }
 }
 
 const getStableDashboard = async () => {
-  if (lastGroundedDashboard) {
-    return lastGroundedDashboard
-  }
-
-  let lastEmptyDashboard = null
-  let lastError = null
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const dashboard = await getDashboardFromAgent()
-
-      if (hasGroundedAssets(dashboard)) {
-        lastGroundedDashboard = dashboard
-        return dashboard
-      }
-
-      lastEmptyDashboard = dashboard
-    } catch (error) {
-      lastError = error
-    }
-  }
-
-  if (lastGroundedDashboard) {
-    return lastGroundedDashboard
-  }
-
-  if (lastEmptyDashboard) {
-    return lastEmptyDashboard
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('Failed to load dashboard from agent.')
+  if (lastGroundedDashboard) return lastGroundedDashboard
+  const dashboard = await getDashboardFromCsv()
+  lastGroundedDashboard = dashboard
+  return dashboard
 }
 
 const server = createServer(async (req, res) => {
@@ -483,17 +648,14 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && req.url === '/api/dashboard/refresh') {
-    // Clear the in-memory cache so the next call re-queries the agent
     lastGroundedDashboard = null
     try {
-      const dashboard = await getDashboardFromAgent()
-      if (hasGroundedAssets(dashboard)) {
-        lastGroundedDashboard = dashboard
-      }
+      const dashboard = await getDashboardFromCsv()
+      lastGroundedDashboard = dashboard
       json(res, 200, dashboard)
     } catch (error) {
       json(res, 502, {
-        error: error instanceof Error ? error.message : 'Failed to refresh scores from agent.',
+        error: error instanceof Error ? error.message : 'Failed to refresh dashboard.',
       })
     }
     return
@@ -518,8 +680,32 @@ const server = createServer(async (req, res) => {
 
       const authHeaders = await getAuthHeaders()
 
+      // On first message: try server-side data query handling first (avoids agent tool timeouts)
+      let userContent = message.trim()
+      if (!previousResponseId && isDataQuery(message)) {
+        try {
+          const dataReply = await handleDataQuery(message)
+          if (dataReply) {
+            json(res, 200, { reply: dataReply, responseId: null })
+            return
+          }
+        } catch (err) {
+          console.error('[chat] data query handler failed, falling back to agent:', err.message)
+        }
+      }
+
+      // Inject filtered asset context for first-turn agent calls
+      if (!previousResponseId) {
+        try {
+          const ctx = await buildContextForMessage(message)
+          userContent = `${ctx}\n\nUser question: ${userContent}`
+        } catch {
+          // non-fatal
+        }
+      }
+
       const requestBody = {
-        input: [{ role: 'user', content: message.trim() }],
+        input: [{ role: 'user', content: userContent }],
         agent_reference: {
           name: process.env.AZURE_AI_AGENT_NAME || 'renewal-agent-test1',
           ...(process.env.AZURE_AI_AGENT_VERSION ? { version: process.env.AZURE_AI_AGENT_VERSION } : {}),
