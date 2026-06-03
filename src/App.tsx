@@ -47,6 +47,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [activeAsset, setActiveAsset] = useState<Asset | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [chatExpanded, setChatExpanded] = useState(false)
   const closeModal = () => setActiveAsset(null)
 
   useEffect(() => {
@@ -294,7 +295,9 @@ function App() {
               <div className="assist-header">
                 <span className="assist-header__icon">&#129302;</span>
                 <span className="assist-header__title">AI Renewal Assistant</span>
-                <button className="assist-close" aria-label="Close">&#10005;</button>
+                <button className="assist-expand" onClick={() => setChatExpanded(true)} aria-label="Expand chat" title="Expand chat">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </button>
               </div>
 
               <div className="assist-section">
@@ -322,6 +325,22 @@ function App() {
 
         </div>
       </div>
+
+      {/* -- Expanded Chat Modal -- */}
+      {chatExpanded && (
+        <div className="chat-modal-backdrop" onClick={() => setChatExpanded(false)} role="dialog" aria-modal="true" aria-label="AI Renewal Assistant">
+          <div className="chat-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="chat-modal-header">
+              <span className="chat-modal-header__icon">&#129302;</span>
+              <span className="chat-modal-header__title">AI Renewal Assistant</span>
+              <button className="chat-modal-close" onClick={() => setChatExpanded(false)} aria-label="Collapse chat">&#10005;</button>
+            </div>
+            <div className="chat-modal-body">
+              <BotChat />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* -- Review Actions Modal -- */}
       {activeAsset && (() => {
