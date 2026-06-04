@@ -2,14 +2,15 @@
    Base / Shell
 ------------------------------------------------- */
 .shell {
-  height: 100vh;
+  min-height: 100vh;
   background: #eef0f6;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   justify-content: center;
   padding: 14px 16px;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: auto;
 }
 
 .status-wrap {
@@ -39,7 +40,7 @@
 .page-card {
   width: 100%;
   max-width: 1480px;
-  height: 100%;
+  min-height: calc(100vh - 28px);
   background: #fff;
   border-radius: 20px;
   box-shadow: 0 12px 48px rgba(34,51,84,.10);
@@ -318,6 +319,7 @@
   border-right: 1px solid #f0f2f9;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -411,18 +413,26 @@
   border-radius: 14px;
   overflow: hidden;
   margin-right: 16px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 
 .tbl-scroll {
   width: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-x: auto;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
   table-layout: fixed;
 }
