@@ -62,6 +62,7 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [previousResponseId, setPreviousResponseId] = useState<string | null>(null)
+  const [notifOpen, setNotifOpen] = useState(false)
 
   const sendChatMessage = async () => {
     const text = chatInput.trim()
@@ -215,10 +216,59 @@ function App() {
               <svg className="refresh-btn__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
               {isRefreshing ? "Recomputing…" : "Refresh Scores"}
             </button>
-            <button className="notif-btn" aria-label="Notifications">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-              <span className="notif-badge">3</span>
-            </button>
+            <div className="notif-wrap">
+              <button className="notif-btn" aria-label="Notifications" onClick={() => setNotifOpen((o) => !o)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                {highAssets.length > 0 && <span className="notif-badge">{highAssets.length}</span>}
+              </button>
+              {notifOpen && (
+                <>
+                  <div className="notif-overlay" onClick={() => setNotifOpen(false)} />
+                  <div className="notif-panel" role="dialog" aria-label="Immediate action notifications">
+                    <div className="notif-panel__header">
+                      <span className="notif-panel__title">&#9889; Immediate Actions</span>
+                      <span className="notif-panel__count">{highAssets.length} High Risk</span>
+                      <button className="notif-panel__close" onClick={() => setNotifOpen(false)} aria-label="Close">&#10005;</button>
+                    </div>
+                    <div className="notif-panel__list">
+                      {highAssets.length === 0 ? (
+                        <div className="notif-empty">No high risk assets at this time.</div>
+                      ) : (
+                        highAssets
+                          .slice()
+                          .sort((a, b) => b.riskScore - a.riskScore)
+                          .map((a) => (
+                            <div
+                              key={a.id}
+                              className="notif-item"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => { setActiveAsset(a); setNotifOpen(false) }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { setActiveAsset(a); setNotifOpen(false) } }}
+                            >
+                              <div className="notif-item__row">
+                                <span className="notif-item__id">{a.id}</span>
+                                <span className="notif-item__name">{a.assetName}</span>
+                                <span className={`notif-item__exp${a.expiresInDays <= 0 ? ' notif-item__exp--overdue' : a.expiresInDays <= 30 ? ' notif-item__exp--urgent' : ''}`}>
+                                  {a.expiresInDays <= 0 ? 'Expired' : `${a.expiresInDays}d`}
+                                </span>
+                              </div>
+                              <div className="notif-item__action">&#9889; {a.recommendedAction || 'Review immediately'}</div>
+                              {a.riskSignals.length > 0 && (
+                                <div className="notif-item__signals">
+                                  {a.riskSignals.slice(0, 2).map((s, i) => (
+                                    <span key={i} className="notif-item__signal">{s}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 

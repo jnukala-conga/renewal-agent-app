@@ -140,17 +140,163 @@
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 16px;
+  min-width: 16px;
   height: 16px;
   border-radius: 999px;
-  background: #6557d2;
+  background: #e05a62;
   color: #fff;
   font-size: 9px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0 3px;
 }
+
+/* Notification wrap — anchor for the dropdown */
+.notif-wrap {
+  position: relative;
+}
+
+/* Full-screen invisible overlay to close panel on outside click */
+.notif-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+/* Notification dropdown panel */
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  width: 360px;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e4eaf7;
+  box-shadow: 0 12px 40px rgba(34,51,84,.16);
+  overflow: hidden;
+}
+
+.notif-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  background: linear-gradient(135deg, #fff2f2 0%, #ffe4e4 100%);
+  border-bottom: 1px solid #f9c4c4;
+}
+
+.notif-panel__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: #c03840;
+}
+
+.notif-panel__count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: #e05a62;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.notif-panel__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #c03840;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.notif-panel__close:hover { background: rgba(224,90,98,.12); }
+
+.notif-panel__list {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.notif-empty {
+  padding: 20px 16px;
+  font-size: 13px;
+  color: #9ba8c0;
+  text-align: center;
+}
+
+.notif-item {
+  padding: 11px 14px;
+  border-bottom: 1px solid #f3f5fb;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: #fff4f4; }
+
+.notif-item__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.notif-item__id {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1d2741;
+  font-family: "Consolas", monospace;
+  flex-shrink: 0;
+}
+
+.notif-item__name {
+  font-size: 11px;
+  color: #52607f;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-item__exp {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ba8c0;
+  flex-shrink: 0;
+}
+.notif-item__exp--urgent  { color: #e05a62; }
+.notif-item__exp--overdue { color: #e05a62; }
+
+.notif-item__action {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c03840;
+  margin-bottom: 5px;
+  line-height: 1.4;
+}
+
+.notif-item__signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.notif-item__signal {
+  font-size: 10px;
+  color: #7a87a6;
+  background: #f4f6fb;
+  border: 1px solid #e4eaf7;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 /* -------------------------------------------------
    Page body: main col + assist panel
