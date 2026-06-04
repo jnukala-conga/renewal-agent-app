@@ -790,39 +790,7 @@ const server = createServer(async (req, res) => {
     }
     return
   }
-
-  // Serve static files from dist/ (production build)
-  const distDir = path.join(serverDir, 'dist')
-  const MIME = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'application/javascript',
-    '.css': 'text/css',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2',
-    '.ttf': 'font/ttf',
-    '.txt': 'text/plain',
-  }
-  try {
-    let filePath = path.join(distDir, req.url.split('?')[0])
-    try {
-      const s = await stat(filePath)
-      if (s.isDirectory()) filePath = path.join(filePath, 'index.html')
-    } catch {
-      // not a real file — fall back to SPA index.html
-      filePath = path.join(distDir, 'index.html')
-    }
-    const ext = path.extname(filePath).toLowerCase()
-    const contentType = MIME[ext] || 'application/octet-stream'
-    res.writeHead(200, { 'Content-Type': contentType })
-    createReadStream(filePath).pipe(res)
-  } catch {
     json(res, 404, { error: 'Not found.' })
-  }
 })
 
 server.listen(port, () => {
