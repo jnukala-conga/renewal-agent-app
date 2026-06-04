@@ -200,7 +200,7 @@ function App() {
           <div className="page-header__brand">
             <div className="brand-avatar">C</div>
             <div>
-              <h1 className="page-header__title">Revenue Renewal Intelligence</h1>
+              <h1 className="page-header__title">AI Powered Renewal Intelligence</h1>
               <p className="page-header__sub">Predictive revenue opportunity &amp; upsell intelligence powered by AI risk scoring</p>
             </div>
           </div>
