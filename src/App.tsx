@@ -251,30 +251,30 @@ function App() {
                 <table>
                   <colgroup>
                     <col className="c-asset" />
-                    <col className="c-sm" />
-                    <col className="c-xs" />
-                    <col className="c-sm" />
-                    <col className="c-sm" />
-                    <col className="c-sm" />
-                    <col className="c-sm" />
-                    <col className="c-sm" />
-                    <col className="c-sm" />
+                    <col className="c-price" />
+                    <col className="c-arr" />
+                    <col className="c-term" />
+                    <col className="c-exp" />
+                    <col className="c-due" />
+                    <col className="c-tcv" />
+                    <col className="c-ren" />
+                    <col className="c-ups" />
                     <col className="c-badge" />
                     <col className="c-actions" />
                   </colgroup>
                   <thead>
                     <tr>
                       <th>Asset</th>
-                      <th className="th-r">Price</th>
-                      <th className="th-c">Mo</th>
-                      <th>Expires</th>
-                      <th className="th-r">Due</th>
-                      <th className="th-r">TCV</th>
+                      <th className="th-r">Net Price</th>
                       <th className="th-r">ARR</th>
-                      <th className="th-r">Renew</th>
-                      <th className="th-r">Upsell</th>
-                      <th className="th-c">Risk</th>
-                      <th>Actions</th>
+                      <th className="th-c">Term</th>
+                      <th>Expires In Days</th>
+                      <th className="th-r">Due Amount</th>
+                      <th className="th-r">TCV</th>
+                      <th className="th-r">Renewal Amount</th>
+                      <th className="th-r th-ai"><span className="th-ai-badge">&#10022; AI</span>Upsell Opportunity Amount</th>
+                      <th className="th-c th-ai"><span className="th-ai-badge">&#10022; AI</span>Risk Band</th>
+                      <th className="th-ai"><span className="th-ai-badge">&#10022; AI</span>Recommended Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -289,6 +289,7 @@ function App() {
                               </div>
                             </td>
                             <td className="td-r">{formatCurrency(asset.netPrice)}</td>
+                            <td className="td-r">{formatCurrency(asset.arr)}</td>
                             <td className="td-c">{asset.term}m</td>
                             <td>
                               <div className="cell-expires">
@@ -300,13 +301,12 @@ function App() {
                             </td>
                             <td className={`td-r ${asset.dueAmount > 0 ? "amt-due" : "amt-zero"}`}>{formatCurrency(asset.dueAmount)}</td>
                             <td className="td-r">{formatCurrency(asset.tcv)}</td>
-                            <td className="td-r">{formatCurrency(asset.arr)}</td>
                             <td className="td-r amt-renewal">{formatCurrency(asset.renewalAmount)}</td>
-                            <td className={`td-r ${asset.upsellOpportunityAmount > 0 ? "amt-upsell" : "amt-zero"}`}>{formatCurrency(asset.upsellOpportunityAmount)}</td>
-                            <td className="td-c">
+                            <td className={`td-r td-ai ${asset.upsellOpportunityAmount > 0 ? "amt-upsell" : "amt-zero"}`}>{formatCurrency(asset.upsellOpportunityAmount)}</td>
+                            <td className="td-c td-ai">
                               <span className={`rbadge rbadge--${tone}`}>{asset.riskBand.toUpperCase()}</span>
                             </td>
-                            <td className="td-act">
+                            <td className="td-act td-ai">
                               {asset.recommendedAction ? (
                                 <button className={`act-btn act-btn--${tone}`} onClick={() => setActiveAsset(asset)}>
                                   <span className={`act-dot act-dot--${tone}`} />
@@ -324,6 +324,8 @@ function App() {
                 </table>
               </div>
             </div>
+
+
           </div>
 
           {/* -- AI Assistant panel -- */}
