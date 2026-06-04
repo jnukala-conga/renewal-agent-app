@@ -118,6 +118,8 @@ const getSignalContext = async (customerIds) => {
 // Parsed and joined asset data, cached after first load
 let _allJoinedAssets = null
 let _cachedDashboard = null  // last agent-scored dashboard, shared with chat context
+// Current scoring weights — configurable via POST /api/weights
+let _currentWeights = { billing: 0.30, lifecycle: 0.25, engagement: 0.25, commercial: 0.20 }
 const getAllJoinedAssets = async () => {
   if (_allJoinedAssets) return _allJoinedAssets
 
@@ -213,7 +215,7 @@ const joinedToGridFormat = (a) => ({
   'TCV': a.tcv,
 })
 
-const buildRiskPrompt = (assets) => {
+const buildRiskPrompt = (assets, weights = _currentWeights) => {
   const assetTable = assets.map((a) => [
     `Asset ID: ${a['Id']}`,
     `Name: ${a['Asset Name']}`,
@@ -232,6 +234,13 @@ You are a renewal risk analyst. Based on the asset data below, compute a Renewal
 
 ASSETS:
 ${assetTable}
+
+Scoring formula (weighted composite — use these exact weights):
+  renewal_risk_score =
+    billing_health_score         × ${(weights.billing * 100).toFixed(0)}%  +
+    subscription_lifecycle_score × ${(weights.lifecycle * 100).toFixed(0)}%  +
+    engagement_score             × ${(weights.engagement * 100).toFixed(0)}%  +
+    commercial_fit_score         × ${(weights.commercial * 100).toFixed(0)}%
 
 Scoring rules:
 - Due Amount > 0 → billing risk (higher = worse)
@@ -566,11 +575,11 @@ const callAgentWithRetry = async (promptText, maxRetries = 3) => {
   }
 }
 
-const getDashboardFromCsv = async () => {
+const getDashboardFromCsv = async (weights = _currentWeights) => {
   const csvAssets = await loadCsvAssets()
   let agentResponse = null
   try {
-    agentResponse = await callAgentWithRetry(buildRiskPrompt(csvAssets))
+    agentResponse = await callAgentWithRetry(buildRiskPrompt(csvAssets, weights))
   } catch (err) {
     console.warn('[getDashboardFromCsv] agent scoring failed, using local scores:', err.message)
   }
@@ -634,6 +643,69 @@ const formatChatReply = (text) => {
     return `**Renewal Risk Analysis** (${parsed.scores.length} assets)\n\n${rows}${trending}`
   } catch {
     return trimmed
+  }
+}
+
+// Prompt the agent to rewrite its own scoring configuration with new weights
+const promptAgentToRewriteWeightsConfig = async (w) => {
+  const filePath = path.join(serverDir, 'public', 'renewal-risk-score-aggregator.md')
+  try {
+    const currentContent = await readFile(filePath, 'utf8')
+
+    const prompt =
+      `You are the renewal risk scoring agent. The user has updated the scoring dimension weights.\n\n` +
+      `NEW WEIGHTS (must sum to 100%):\n` +
+      `- Billing Health:            ${Math.round(w.billing * 100)}%  (${w.billing.toFixed(2)})\n` +
+      `- Subscription Lifecycle:    ${Math.round(w.lifecycle * 100)}%  (${w.lifecycle.toFixed(2)})\n` +
+      `- Engagement:                ${Math.round(w.engagement * 100)}%  (${w.engagement.toFixed(2)})\n` +
+      `- Commercial Fit:            ${Math.round(w.commercial * 100)}%  (${w.commercial.toFixed(2)})\n\n` +
+      `Here is your current configuration file (renewal-risk-score-aggregator.md):\n\n` +
+      `${currentContent}\n\n` +
+      `Rewrite the ENTIRE file, updating ALL occurrences of the scoring weights and percentages to match the new values above. ` +
+      `Update the formula in Section 2, the component percentage labels, and any Mermaid diagrams or flowcharts that show weights. ` +
+      `Preserve all other content, headings, structure, and formatting exactly. ` +
+      `Reply with ONLY the complete updated file content — no explanation, no markdown fences, no extra text.`
+
+    const authHeaders = await getAuthHeaders()
+    const requestBody = {
+      input: [{ role: 'user', content: prompt }],
+      agent_reference: {
+        name: process.env.AZURE_AI_AGENT_NAME || 'renewal-agent-test1',
+        ...(process.env.AZURE_AI_AGENT_VERSION ? { version: process.env.AZURE_AI_AGENT_VERSION } : {}),
+        type: 'agent_reference',
+      },
+    }
+
+    const response = await fetch(buildAgentUrl(), {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    const rawText = await response.text()
+    let data
+    try { data = rawText ? JSON.parse(rawText) : {} } catch { data = {} }
+
+    if (!response.ok) {
+      console.warn('[promptAgentToRewriteWeightsConfig] agent error:', data?.error?.message || rawText.slice(0, 200))
+      return
+    }
+
+    const updatedContent =
+      data.output_text ??
+      data.output?.find((o) => o.type === 'message')
+        ?.content?.find((c) => c.type === 'output_text')?.text ??
+      ''
+
+    if (updatedContent && updatedContent.trim().length > 100) {
+      await writeFile(filePath, updatedContent.trim(), 'utf8')
+      _knowledgeBase = null  // invalidate knowledge-base cache so new weights are picked up by chat
+      console.log('[promptAgentToRewriteWeightsConfig] agent rewrote scoring config successfully')
+    } else {
+      console.warn('[promptAgentToRewriteWeightsConfig] agent returned empty/short content, skipping file update')
+    }
+  } catch (e) {
+    console.warn('[promptAgentToRewriteWeightsConfig] failed:', e.message)
   }
 }
 
@@ -790,6 +862,34 @@ const server = createServer(async (req, res) => {
     }
     return
   }
+  if (req.method === 'POST' && req.url === '/api/weights') {
+    try {
+      const body = await readBody(req)
+      const { weights } = body
+      if (!weights || typeof weights !== 'object') {
+        json(res, 400, { error: 'weights object is required.' })
+        return
+      }
+      const { billing, lifecycle, engagement, commercial } = weights
+      if ([billing, lifecycle, engagement, commercial].some((v) => typeof v !== 'number' || v < 0 || v > 1)) {
+        json(res, 400, { error: 'Each weight must be a number between 0 and 1.' })
+        return
+      }
+      const total = billing + lifecycle + engagement + commercial
+      if (Math.abs(total - 1.0) > 0.015) {
+        json(res, 400, { error: `Weights must sum to 1.0, got ${total.toFixed(3)}.` })
+        return
+      }
+      _currentWeights = { billing, lifecycle, engagement, commercial }
+      // Fire-and-forget: prompt the agent to rewrite its own scoring config with the new weights
+      void promptAgentToRewriteWeightsConfig(_currentWeights)
+      json(res, 200, { ok: true, weights: _currentWeights })
+    } catch (error) {
+      json(res, 500, { error: error instanceof Error ? error.message : 'Failed to update weights.' })
+    }
+    return
+  }
+
     json(res, 404, { error: 'Not found.' })
 })
 

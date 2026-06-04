@@ -31,6 +31,22 @@ type DashboardData = {
   syncedAt: string | null
 }
 
+type Weights = {
+  billing: number
+  lifecycle: number
+  engagement: number
+  commercial: number
+}
+
+const DEFAULT_WEIGHTS: Weights = { billing: 0.30, lifecycle: 0.25, engagement: 0.25, commercial: 0.20 }
+
+const WEIGHT_DIMS: { key: keyof Weights; label: string }[] = [
+  { key: 'billing',    label: 'Billing Health' },
+  { key: 'lifecycle',  label: 'Subscription Lifecycle' },
+  { key: 'engagement', label: 'Engagement' },
+  { key: 'commercial', label: 'Commercial Fit' },
+]
+
 const formatCurrency = (value: number) => {
   const abs = Math.abs(value)
   return new Intl.NumberFormat("en-US", {
@@ -63,6 +79,9 @@ function App() {
   const [chatError, setChatError] = useState<string | null>(null)
   const [previousResponseId, setPreviousResponseId] = useState<string | null>(null)
   const [notifOpen, setNotifOpen] = useState(false)
+  const [weightsOpen, setWeightsOpen] = useState(false)
+  const [weights, setWeights] = useState<Weights>(DEFAULT_WEIGHTS)
+  const [pendingWeights, setPendingWeights] = useState<Weights>(DEFAULT_WEIGHTS)
 
   const sendChatMessage = async () => {
     const text = chatInput.trim()
@@ -122,6 +141,28 @@ function App() {
       setError(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to refresh scores.")
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const applyWeights = async () => {
+    setWeightsOpen(false)
+    setWeights(pendingWeights)
+    setIsRefreshing(true)
+    try {
+      await fetch('/api/weights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weights: pendingWeights }),
+      })
+      const response = await fetch('/api/dashboard/refresh', { method: 'POST' })
+      const payload = (await response.json()) as DashboardData & { error?: string }
+      if (!response.ok) throw new Error(payload.error || 'Refresh failed.')
+      setDashboard(payload)
+      setError(null)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Failed to apply weights.')
     } finally {
       setIsRefreshing(false)
     }
@@ -216,8 +257,76 @@ function App() {
               <svg className="refresh-btn__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
               {isRefreshing ? "Recomputing…" : "Refresh Scores"}
             </button>
+
+            {/* Scoring weight configurability */}
+            <div className="weights-wrap">
+              <button
+                className={`weights-btn${weightsOpen ? ' weights-btn--active' : ''}`}
+                aria-label="Configure scoring weights"
+                title="Configure scoring weights"
+                onClick={() => { setPendingWeights(weights); setWeightsOpen((o) => !o); setNotifOpen(false) }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </button>
+              {weightsOpen && (() => {
+                const totalPct = Math.round((pendingWeights.billing + pendingWeights.lifecycle + pendingWeights.engagement + pendingWeights.commercial) * 100)
+                const valid = totalPct === 100
+                return (
+                  <>
+                    <div className="weights-panel" role="dialog" aria-label="Configure scoring weights">
+                      <div className="weights-panel__header">
+                        <span className="weights-panel__title">&#9881; Risk Score Weights</span>
+                        <button className="weights-panel__close" onClick={() => setWeightsOpen(false)} aria-label="Close">&#10005;</button>
+                      </div>
+                      <div className="weights-panel__body">
+                        <p className="weights-panel__desc">Adjust the contribution of each dimension to the renewal risk score.</p>
+                        {WEIGHT_DIMS.map(({ key, label }) => {
+                          const pct = Math.round(pendingWeights[key] * 100)
+                          return (
+                            <div className="wrow" key={key}>
+                              <div className="wrow__head">
+                                <span className="wrow__label">{label}</span>
+                                <span className="wrow__pct">{pct}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0} max={100} step={1}
+                                value={pct}
+                                onChange={(e) => setPendingWeights((prev) => ({ ...prev, [key]: Number(e.target.value) / 100 }))}
+                                className="wrow__slider"
+                                aria-label={`${label} weight`}
+                              />
+                            </div>
+                          )
+                        })}
+                        <div className={`weights-total${valid ? ' weights-total--ok' : ' weights-total--err'}`}>
+                          Total: <strong>{totalPct}%</strong>
+                          {!valid && <span className="weights-total__hint"> — must equal 100%</span>}
+                          {valid && <span className="weights-total__check"> &#10003;</span>}
+                        </div>
+                      </div>
+                      <div className="weights-panel__footer">
+                        <button
+                          className="weights-reset"
+                          onClick={() => setPendingWeights(DEFAULT_WEIGHTS)}
+                        >Reset defaults</button>
+                        <button
+                          className="weights-apply"
+                          disabled={!valid || isRefreshing}
+                          onClick={() => { void applyWeights() }}
+                        >{isRefreshing ? 'Recomputing…' : 'Apply & Refresh Scores'}</button>
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+
             <div className="notif-wrap">
-              <button className="notif-btn" aria-label="Notifications" onClick={() => setNotifOpen((o) => !o)}>
+              <button className="notif-btn" aria-label="Notifications" onClick={() => { setNotifOpen((o) => !o); setWeightsOpen(false) }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 {highAssets.length > 0 && <span className="notif-badge">{highAssets.length}</span>}
               </button>
@@ -424,7 +533,7 @@ function App() {
 
       {/* -- Expanded Chat Modal -- */}
       {chatExpanded && (
-        <div className="chat-modal-backdrop" onClick={() => setChatExpanded(false)} role="dialog" aria-modal="true" aria-label="AI Renewal Assistant">
+        <div className="chat-modal-backdrop" role="dialog" aria-modal="true" aria-label="AI Renewal Assistant">
           <div className="chat-modal-card" onClick={e => e.stopPropagation()}>
             <div className="chat-modal-header">
               <span className="chat-modal-header__icon">&#129302;</span>
