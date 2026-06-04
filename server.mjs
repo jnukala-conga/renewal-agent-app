@@ -187,38 +187,16 @@ const buildContextForMessage = async (message) => {
   // Enrich with per-customer signals from all signal CSVs
   const customerIds = [...new Set(filtered.map((a) => a.customerId))]
 
-  // Compute authoritative risk scores first (per-asset signals, deterministic)
-  const authoritative = filtered.map((a) => {
-    if (_cachedDashboard) {
-      const cached = _cachedDashboard.assets.find((x) => x.id === a.id)
-      if (cached) {
-        const upsell = cached.upsellOpportunityAmount ? `, UpsellOpportunity=$${cached.upsellOpportunityAmount}` : ''
-        return `${a.id} (${a.product}): RiskBand=${cached.riskBand}, RiskScore=${cached.riskScore}${upsell}`
-      }
-    }
-    const { score, band } = computeLocalRiskScore({
-      'Expires In Days': a.expiresInDays,
-      'Due Amount': a.dueAmount,
-      'ARR': a.arr,
-    })
-    const upsell = a.upsellOpportunity ? `, UpsellOpportunity=$${a.upsellOpportunity}` : ''
-    return `${a.id} (${a.product}): RiskBand=${band}, RiskScore=${score}${upsell}`
-  }).filter(Boolean)
-
-  const scoreBlock = authoritative.length
-    ? `\n\n[AUTHORITATIVE RISK SCORES — final ground truth, do NOT re-compute or override with customer-level signals]\n${authoritative.join('\n')}\nBands: Low=0-40, Medium=41-70, High=71-100`
-    : ''
-
   let signalBlock = ''
   try {
     const signals = await getSignalContext(customerIds)
-    signalBlock = '\n\n[CUSTOMER SIGNALS — background context only, do NOT use to re-score individual assets]\n' +
+    signalBlock = '\n\n[CUSTOMER SIGNALS]\n' +
       Object.entries(signals).map(([cid, s]) => `${cid}: ${s}`).join('\n')
   } catch {
     // non-fatal — agent can still use asset data
   }
 
-  return `${scoreBlock ? scoreBlock + '\n\n' : ''}[ASSET DATA — ${filtered.length} asset(s) matching your query]\n${rows}${signalBlock}`
+  return `[ASSET DATA — ${filtered.length} asset(s) matching your query]\n${rows}${signalBlock}`
 }
 
 // Convert joined asset record to assets_grid format for buildRiskPrompt
@@ -258,8 +236,8 @@ Scoring rules:
 - Due Amount > 0 → billing risk (higher = worse)
 - Expires In Days < 30 → urgency risk
 - Low ARR relative to Net Price → financial mismatch
-- Risk Band: Low (0-40), Medium (41-70), High (71-100)
-- Map any "Critical" to "High"
+- Risk Band: Low (0-30), Medium (31-55), High (56-75), Critical (76-100)
+- "Critical" is a valid band (highest severity)
 
 Return this exact JSON shape:
 {
@@ -385,39 +363,6 @@ const readNumberField = (record, keys, fallback = 0) => {
 const parseCsvNumber = (val) => {
   if (!val || String(val).trim() === '') return 0
   return Number(String(val).replace(/[$,%\s]/g, '')) || 0
-}
-
-// Deterministic per-asset risk scoring based on asset-level signals only
-// Scores spread: Low 0-40, Medium 41-70, High 71-100
-const computeLocalRiskScore = (asset) => {
-  const days = Number(String(asset['Expires In Days'] ?? asset.expiresInDays ?? 999).replace(/[^0-9.-]/g, ''))
-  const due  = parseCsvNumber(asset['Due Amount']  ?? asset.dueAmount ?? '0')
-  const arr  = parseCsvNumber(asset['ARR']          ?? asset.arr      ?? '0')
-
-  // Expiry urgency (0-50 pts) — dominant factor
-  let expiryPts = 0
-  if      (days <= 0)   expiryPts = 50
-  else if (days <= 14)  expiryPts = 45
-  else if (days <= 30)  expiryPts = 35
-  else if (days <= 60)  expiryPts = 20
-  else if (days <= 90)  expiryPts = 10
-  else if (days <= 180) expiryPts = 3
-
-  // Billing pressure (0-35 pts)
-  let billingPts = 0
-  if      (due > 10000) billingPts = 35
-  else if (due > 5000)  billingPts = 32
-  else if (due > 2000)  billingPts = 15
-  else if (due > 0)     billingPts = 8
-
-  // Small ARR = higher churn vulnerability (0-15 pts)
-  let arrPts = 0
-  if      (arr > 0 && arr < 20000) arrPts = 15
-  else if (arr > 0 && arr < 40000) arrPts = 8
-
-  const score = Math.min(100, expiryPts + billingPts + arrPts)
-  const band  = score >= 71 ? 'High' : score >= 41 ? 'Medium' : 'Low'
-  return { score, band }
 }
 
 const loadCsvAssets = async () => {
@@ -629,7 +574,17 @@ const getDashboardFromCsv = async () => {
 
   const assets = csvAssets.map((row) => {
     const s = scoreMap.get(row['Id']) || {}
-    const local = computeLocalRiskScore(row)
+
+    // Agent is the sole source of truth for risk band and score
+    let agentBand = 'Low'
+    let agentScore = 0
+    if (s['Risk Band']) {
+      try { agentBand = normalizeRisk(s['Risk Band']) } catch { agentBand = 'Low' }
+    }
+    if (typeof s['Risk Score'] === 'number' && !Number.isNaN(s['Risk Score'])) {
+      agentScore = Math.min(100, Math.max(0, Math.round(s['Risk Score'])))
+    }
+
     return {
       id: row['Id'],
       assetName: row['Asset Name'],
@@ -641,8 +596,8 @@ const getDashboardFromCsv = async () => {
       tcv: parseCsvNumber(row['TCV']),
       renewalAmount: parseCsvNumber(row['Renewal Amount']),
       upsellOpportunityAmount: parseCsvNumber(row['Upsell Opportunity Amount']),
-      riskBand: local.band,
-      riskScore: local.score,
+      riskBand: agentBand,
+      riskScore: agentScore,
       riskSignals: Array.isArray(s['Risk Signals']) ? s['Risk Signals'].map(String) : [],
       recommendedAction: s['Recommended Action'] ?? '',
     }
