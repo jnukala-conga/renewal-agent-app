@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import dotenv from 'dotenv'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { AzureCliCredential, ChainedTokenCredential, InteractiveBrowserCredential } from '@azure/identity'
@@ -36,7 +37,7 @@ const getKnowledgeBase = async () => {
   return _knowledgeBase
 }
 
-const port = Number(process.env.BOT_TOKEN_SERVER_PORT || 3978)
+const port = Number(process.env.PORT || process.env.BOT_TOKEN_SERVER_PORT || 3978)
 
 // Module-level CSV parser (handles quoted fields)
 const parseCsv = async (filename) => {
@@ -484,6 +485,10 @@ const getCredential = () => {
 }
 
 const getAuthHeaders = async () => {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (apiKey) {
+    return { 'api-key': apiKey }
+  }
   const tokenResponse = await getCredential().getToken('https://ai.azure.com/.default')
   return { Authorization: `Bearer ${tokenResponse.token}` }
 }
@@ -786,9 +791,40 @@ const server = createServer(async (req, res) => {
     return
   }
 
-  json(res, 404, { error: 'Not found.' })
+  // Serve static files from dist/ (production build)
+  const distDir = path.join(serverDir, 'dist')
+  const MIME = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'application/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.txt': 'text/plain',
+  }
+  try {
+    let filePath = path.join(distDir, req.url.split('?')[0])
+    try {
+      const s = await stat(filePath)
+      if (s.isDirectory()) filePath = path.join(filePath, 'index.html')
+    } catch {
+      // not a real file — fall back to SPA index.html
+      filePath = path.join(distDir, 'index.html')
+    }
+    const ext = path.extname(filePath).toLowerCase()
+    const contentType = MIME[ext] || 'application/octet-stream'
+    res.writeHead(200, { 'Content-Type': contentType })
+    createReadStream(filePath).pipe(res)
+  } catch {
+    json(res, 404, { error: 'Not found.' })
+  }
 })
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Token server listening on http://127.0.0.1:${port}`)
+server.listen(port, () => {
+  console.log(`Server listening on port ${port}`)
 })
